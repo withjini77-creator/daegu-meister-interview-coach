@@ -1,8 +1,10 @@
-
- // Vercel serverless function using Google Gemini API.
+```javascript
+// Vercel serverless function using Google Gemini API.
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({
+      error: 'Method not allowed'
+    });
   }
 
   if (!process.env.GEMINI_API_KEY) {
@@ -16,11 +18,15 @@ export default async function handler(req, res) {
   if (![school, question, answer].every(
     v => typeof v === 'string' && v.trim()
   )) {
-    return res.status(400).json({ error: 'Missing required fields' });
+    return res.status(400).json({
+      error: 'Missing required fields'
+    });
   }
 
   if (answer.length > 6000) {
-    return res.status(413).json({ error: 'Answer is too long' });
+    return res.status(413).json({
+      error: 'Answer is too long'
+    });
   }
 
   const prompt = `너는 한국 중학생의 마이스터고 면접 연습을 돕는 코치다.
@@ -54,7 +60,7 @@ export default async function handler(req, res) {
 
   try {
     const upstream = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
       {
         method: 'POST',
         headers: {
@@ -62,7 +68,13 @@ export default async function handler(req, res) {
           'x-goog-api-key': process.env.GEMINI_API_KEY
         },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [
+            {
+              parts: [
+                { text: prompt }
+              ]
+            }
+          ],
           generationConfig: {
             responseMimeType: 'application/json',
             responseSchema: {
@@ -83,8 +95,13 @@ export default async function handler(req, res) {
                 caution: { type: 'STRING' }
               },
               required: [
-                'score', 'headline', 'strengths', 'improvements',
-                'followup', 'structure', 'caution'
+                'score',
+                'headline',
+                'strengths',
+                'improvements',
+                'followup',
+                'structure',
+                'caution'
               ]
             }
           }
@@ -95,9 +112,16 @@ export default async function handler(req, res) {
     const raw = await upstream.json();
 
     if (!upstream.ok) {
-      console.error('Gemini API error:', raw.error?.code || upstream.status);
+      // 오류 원인을 확인하되 API 키는 기록하지 않음
+      console.error(
+        'Gemini API error:',
+        upstream.status,
+        raw.error?.message || 'Unknown provider error'
+      );
+
       return res.status(502).json({
-        error: 'AI provider request failed'
+        error: 'AI provider request failed',
+        detail: raw.error?.message || 'Gemini API request failed'
       });
     }
 
@@ -106,17 +130,27 @@ export default async function handler(req, res) {
       .join('');
 
     if (!output) {
+      console.error(
+        'Gemini returned no output:',
+        JSON.stringify(raw.promptFeedback || {})
+      );
+
       return res.status(502).json({
         error: 'No structured output returned'
       });
     }
 
     return res.status(200).json(JSON.parse(output));
+
   } catch (e) {
-    console.error('Feedback generation failed:', e.message);
+    console.error(
+      'Feedback generation failed:',
+      e.message
+    );
+
     return res.status(500).json({
       error: 'Unable to generate feedback'
     });
   }
 }
-
+```
