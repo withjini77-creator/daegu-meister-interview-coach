@@ -1,11 +1,12 @@
 
- // Vercel serverless function using Google Gemini API.
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  if (!process.env.GEMINI_API_KEY) {
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) {
     return res.status(503).json({
       error: 'GEMINI_API_KEY is not configured'
     });
@@ -13,18 +14,24 @@ export default async function handler(req, res) {
 
   const { school, field, criteria, question, answer } = req.body || {};
 
-  if (![school, question, answer].every(
-    v => typeof v === 'string' && v.trim()
-  )) {
-    return res.status(400).json({ error: 'Missing required fields' });
+  if (
+    typeof school !== 'string' ||
+    typeof question !== 'string' ||
+    typeof answer !== 'string' ||
+    !school.trim() ||
+    !question.trim() ||
+    !answer.trim()
+  ) {
+    return res.status(400).json({ error: '학교, 질문, 답변을 확인해 주세요.' });
   }
 
   if (answer.length > 6000) {
-    return res.status(413).json({ error: 'Answer is too long' });
+    return res.status(413).json({ error: '답변이 너무 깁니다.' });
   }
 
-  const prompt = `너는 한국 중학생의 마이스터고 면접 연습을 돕는 코치다.
-학생을 평가해 합격 여부를 예측하지 말고, 답변을 개선하도록 구체적으로 돕는다.
+  const prompt = `
+너는 한국 중학생의 마이스터고 면접 연습을 돕는 코치다.
+합격 여부를 예측하지 말고 답변을 개선하도록 구체적으로 돕는다.
 
 학교: ${school}
 분야: ${field || ''}
@@ -33,36 +40,38 @@ export default async function handler(req, res) {
 학생 답변: ${answer}
 
 규칙:
-- 학생이 실제로 하지 않은 경험을 만들어 주지 말 것.
-- 모범답안을 통째로 대신 써 주기보다 학생 자신의 경험을 구체화하는 피드백을 할 것.
+- 학생이 하지 않은 경험을 만들어 주지 말 것.
+- 학생 자신의 경험을 구체화하도록 피드백할 것.
 - 참고 정보가 부족하면 임의로 채우지 말 것.
-- 학교의 공식 평가 기준이라고 단정하지 말 것.
+- 공식 평가 기준이나 합격 예측이라고 단정하지 말 것.
 - 존중하는 한국어로 답할 것.
-- score는 0~100 사이의 정수이며 연습용 완성도 점수임.
+- score는 연습용 완성도 점수이며 0~100 사이의 정수다.
 - JSON 객체만 반환할 것.
 
-반드시 다음 필드를 포함할 것:
+다음 필드를 포함할 것:
 {
   "score": 0,
   "headline": "한 줄 총평",
-  "strengths": ["구체적인 강점 1~3개"],
-  "improvements": ["개선점 2~3개"],
-  "followup": "학생이 스스로 답을 구체화하도록 돕는 후속 질문 1개",
+  "strengths": ["구체적인 강점"],
+  "improvements": ["개선점"],
+  "followup": "답변을 구체화하는 후속 질문",
   "structure": "답변 구조 제안",
-  "caution": "점수는 연습용이며 공식 평가나 합격 예측이 아님을 알리는 문구"
+  "caution": "연습용 점수이며 공식 평가나 합격 예측이 아니라는 안내"
 }`;
 
   try {
     const upstream = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent',
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-goog-api-key': process.env.GEMINI_API_KEY
+          'x-goog-api-key': apiKey
         },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: [
+            { parts: [{ text: prompt }] }
+          ],
           generationConfig: {
             responseMimeType: 'application/json',
             responseSchema: {
@@ -83,8 +92,13 @@ export default async function handler(req, res) {
                 caution: { type: 'STRING' }
               },
               required: [
-                'score', 'headline', 'strengths', 'improvements',
-                'followup', 'structure', 'caution'
+                'score',
+                'headline',
+                'strengths',
+                'improvements',
+                'followup',
+                'structure',
+                'caution'
               ]
             }
           }
@@ -97,12 +111,11 @@ export default async function handler(req, res) {
     if (!upstream.ok) {
       console.error(
         'Gemini API error:',
-        upstream.status,
-        raw.error?.message || 'Unknown provider error'
+        raw.error?.message || upstream.status
       );
+
       return res.status(502).json({
-        error: 'AI provider request failed',
-        detail: raw.error?.message || 'Gemini API request failed'
+        error: 'AI provider request failed'
       });
     }
 
@@ -112,15 +125,16 @@ export default async function handler(req, res) {
 
     if (!output) {
       return res.status(502).json({
-        error: 'No structured output returned'
+        error: 'AI 응답을 받지 못했습니다.'
       });
     }
 
     return res.status(200).json(JSON.parse(output));
-  } catch (e) {
-    console.error('Feedback generation failed:', e.message);
+  } catch (error) {
+    console.error('Feedback generation failed:', error.message);
+
     return res.status(500).json({
-      error: 'Unable to generate feedback'
+      error: '피드백 생성 중 오류가 발생했습니다.'
     });
   }
 }
